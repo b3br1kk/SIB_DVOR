@@ -100,12 +100,12 @@
   const CH = [{ t: 9 * 60 + 40 }, { t: 13 * 60 }, { t: 18 * 60 + 30 }, { t: 21 * 60 + 30 }];
   /* Пролёт: 230 кадров из Blender. Удержание главы — неподвижная точка с лёгким дрейфом, затем перелёт. */
   const SEQ = { n: 230, hold: [[1, 20], [70, 90], [140, 160], [210, 230]], fly: [[20, 70], [90, 140], [160, 210]], HOLD: 0.42 };
-  const seq = { set: '', frames: [], loaded: 0, want: 1, shown: 0, ctx: null };
+  const seq = { set: '', frames: [], loaded: 0, want: 1, shown: '', ctx: null };
   function seqSet() { return innerHeight > innerWidth * 1.1 ? 'm' : 'd'; }
   function seqInit() {
     if (!D) return;
     const set = seqSet(); if (set === seq.set) return;
-    seq.set = set; seq.frames = new Array(SEQ.n + 1); seq.loaded = 0; seq.shown = 0;
+    seq.set = set; seq.frames = new Array(SEQ.n + 2); seq.loaded = 0; seq.shown = '';
     const order = []; const seen = new Set(); const add = (i) => { if (i >= 1 && i <= SEQ.n && !seen.has(i)) { seen.add(i); order.push(i); } };
     [1, 20, 70, 90, 140, 160, 210, 230].forEach(add);
     for (const st of [16, 8, 4, 2, 1]) for (let i = 1; i <= SEQ.n; i += st) add(i);
@@ -125,24 +125,37 @@
     };
     next();
   }
+  function nearestLoaded(i) {
+    for (let d = 0; d <= SEQ.n; d++) {
+      if (seq.frames[i - d]) return i - d;
+      if (seq.frames[i + d]) return i + d;
+    }
+    return 0;
+  }
   function drawSeq() {
     if (!D || !seq.frames.length) return;
-    const want = seq.want; let f = 0;
-    for (let d = 0; d <= SEQ.n; d++) {
-      if (seq.frames[want - d]) { f = want - d; break; }
-      if (seq.frames[want + d]) { f = want + d; break; }
-    }
-    if (!f || (f === seq.shown && D.cv.width)) return;
+    // дробный кадр: смешиваем два соседних, чтобы пролёт шёл без ступенек
+    const wf = clamp(seq.want, 1, SEQ.n); const i0 = Math.floor(wf), i1 = Math.min(SEQ.n, i0 + 1);
+    let a = Math.round((wf - i0) * 24) / 24;
+    let f0 = seq.frames[i0] ? i0 : nearestLoaded(i0), f1 = 0;
+    if (!f0) return;
+    if (f0 === i0 && a > 0 && seq.frames[i1]) f1 = i1; else a = 0;
+    const key = f0 + ':' + f1 + ':' + a;
     const cv = D.cv; const r = D.stage.getBoundingClientRect(); const dpr = Math.min(devicePixelRatio || 1, 1.5);
     const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
-    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; seq.ctx = null; }
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; seq.ctx = null; seq.shown = ''; }
+    if (key === seq.shown) return;
     const ctx = seq.ctx || (seq.ctx = cv.getContext('2d', { alpha: false }));
-    const im = seq.frames[f]; const s = Math.max(w / im.naturalWidth, h / im.naturalHeight);
-    const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
-    const ox = seq.set === 'd' ? 0.6 : 0.5; // на широком экране сдвиг кадра вправо, к объекту
-    ctx.drawImage(im, (w - dw) * ox, (h - dh) / 2, dw, dh);
-    seq.shown = f;
-    if (!cv.classList.contains('is-ready')) { cv.classList.add('is-ready'); }
+    const ox = seq.set === 'd' ? 0.6 : 0.5; // на широком экране кадр сдвинут вправо, к объекту
+    const put = (im, alpha) => {
+      const s = Math.max(w / im.naturalWidth, h / im.naturalHeight); const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
+      ctx.globalAlpha = alpha; ctx.drawImage(im, (w - dw) * ox, (h - dh) / 2, dw, dh);
+    };
+    put(seq.frames[f0], 1);
+    if (f1) put(seq.frames[f1], a);
+    ctx.globalAlpha = 1;
+    seq.shown = key;
+    if (!cv.classList.contains('is-ready')) cv.classList.add('is-ready');
   }
   let lastActive = -1, dayP = -1;
   function renderDay(p) {
@@ -154,7 +167,7 @@
     if (c === n - 1) f = lerp(SEQ.hold[c][0], SEQ.hold[c][1], u);
     else if (u < H) f = lerp(SEQ.hold[c][0], SEQ.hold[c][1], u / H);
     else f = lerp(SEQ.fly[c][0], SEQ.fly[c][1], fu);
-    seq.want = Math.round(f); drawSeq();
+    seq.want = f; drawSeq();
     const active = c < n - 1 && fu > 0.8 ? c + 1 : c;
     if (active !== lastActive) {
       lastActive = active; day.dataset.t = active;
@@ -170,6 +183,63 @@
     D.dot.setAttribute('cx', pt.x); D.dot.setAttribute('cy', pt.y);
   }
 
+  /* ——— плавная прокрутка (колесо мыши и тачпад; на телефоне — родная инерция) ———
+     Как у Lenis: колесо задаёт цель, страница догоняет её с экспоненциальным затуханием.
+     Прокрутка остаётся нативной, поэтому sticky-блоки и ScrollTrigger работают как обычно. */
+  const Smooth = (() => {
+    const fine = matchMedia('(hover: hover) and (pointer: fine)').matches;
+    const api = { on: fine && !RM, to: null };
+    const maxY = () => document.documentElement.scrollHeight - innerHeight;
+    let target = scrollY, cur = scrollY, setY = scrollY, raf = 0, last = 0, lambda = 7.5;
+    const stop = () => { cancelAnimationFrame(raf); raf = 0; };
+    function tick(now) {
+      const dt = Math.min(0.05, (now - (last || now)) / 1000 || 1 / 60); last = now;
+      // пользователь потянул полосу прокрутки или нажал клавишу — отдаём управление
+      if (Math.abs(scrollY - setY) > 3) { target = cur = setY = scrollY; raf = 0; last = 0; return; }
+      cur += (target - cur) * (1 - Math.exp(-lambda * dt));
+      if (Math.abs(target - cur) < 0.4) cur = target;
+      setY = Math.round(cur * 10) / 10; scrollTo(0, setY);
+      if (cur !== target) raf = requestAnimationFrame(tick); else { raf = 0; last = 0; }
+    }
+    function go(y, l) { target = clamp(y, 0, maxY()); lambda = l || 7.5; if (!raf) { cur = scrollY; setY = scrollY; last = 0; raf = requestAnimationFrame(tick); } }
+    function scrollable(el, dy) {
+      for (; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+        const cs = getComputedStyle(el); if (!/(auto|scroll)/.test(cs.overflowY)) continue;
+        if (el.scrollHeight > el.clientHeight + 1 && (dy < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1)) return true;
+      }
+      return false;
+    }
+    if (api.on) {
+      document.documentElement.classList.add('smooth');
+      addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.defaultPrevented) return;              // масштаб страницы
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;      // горизонтальный жест — родной
+        if (scrollable(e.target, e.deltaY)) return;                // вложенная прокрутка
+        e.preventDefault();
+        const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? innerHeight : 1;
+        if (!raf) { target = scrollY; }
+        go(target + e.deltaY * k, 7.5);
+      }, { passive: false });
+      addEventListener('scroll', () => { if (!raf) { target = cur = setY = scrollY; } }, { passive: true });
+      addEventListener('resize', () => { target = clamp(target, 0, maxY()); }, { passive: true });
+    }
+    api.to = (el) => {
+      const node = typeof el === 'string' ? document.querySelector(el) : el; if (!node) return;
+      const pad = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
+      const y = node.getBoundingClientRect().top + scrollY - pad;
+      if (RM) { scrollTo(0, y); return; }
+      if (api.on) go(y, 4.2); else node.scrollIntoView({ behavior: 'smooth' });
+    };
+    // якорные ссылки меню и кнопок — тем же движком
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest('a[href^="#"]'); if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      const id = a.getAttribute('href'); if (id.length < 2) return;
+      const node = document.querySelector(id); if (!node) return;
+      e.preventDefault(); api.to(node); history.replaceState(null, '', id);
+    });
+    return api;
+  })();
+
   /* ——— прокрутка ——— */
   let ticking = false;
   function onScroll() {
@@ -179,13 +249,13 @@
       if (day) {
         const r = day.getBoundingClientRect(); const len = r.height - innerHeight;
         const p = clamp(-r.top / Math.max(1, len), 0, 1);
-        if (Math.abs(p - dayP) > 0.0004 || dayP < 0) { dayP = p; renderDay(p); }
+        if (Math.abs(p - dayP) > 0.00005 || dayP < 0) { dayP = p; renderDay(p); }
       }
       topbarTone();
     });
   }
   addEventListener('scroll', onScroll, { passive: true });
-  addEventListener('resize', () => { seqInit(); seq.shown = 0; dayP = -1; onScroll(); renderMapHL(); }, { passive: true });
+  addEventListener('resize', () => { seqInit(); seq.shown = ''; dayP = -1; onScroll(); renderMapHL(); }, { passive: true });
   maskReady.then(() => { renderMapHL(); });
   // кадры пролёта грузим после первого экрана
   if (document.readyState === 'complete') seqInit(); else addEventListener('load', seqInit, { once: true });
@@ -343,7 +413,7 @@
     document.addEventListener('click', (ev) => {
       const b = ev.target.closest('[data-pick]'); if (!b) return;
       const g = b.dataset.pick;
-      if (isPicked(g) && b.classList.contains('step__add')) { $('#den').scrollIntoView({ behavior: RM ? 'auto' : 'smooth' }); return; }
+      if (isPicked(g) && b.classList.contains('step__add')) { Smooth.to('#den'); return; }
       pick(g);
     });
     $('[data-send]').addEventListener('click', async () => {
