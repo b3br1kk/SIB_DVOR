@@ -104,7 +104,7 @@
      с лёгким сглаживанием и смешиваем два соседних кадра. */
   const SEQ = { n: 440, hold: [[1, 20], [140, 160], [280, 300], [420, 440]], fly: [[20, 140], [160, 280], [300, 420]], HOLD: 0.36, dir: { d: 'assets/seq3/d', m: 'assets/seq2/m' } };
   const seq = { set: '', blobs: [], have: 0, bmp: new Map(), pending: new Set(), target: 1, disp: 1, shown: '', ctx: null, raf: 0, last: 0, gen: 0 };
-  const BMP_AHEAD = 24, BMP_BACK = 10, BMP_MAX = 44, DEC_PAR = 4;
+  const BMP_MAX = 64, DEC_PAR = 4;
   function seqSet() { return innerHeight > innerWidth * 1.1 ? 'm' : 'd'; }
   function seqInit() {
     if (!D) return;
@@ -141,16 +141,22 @@
       seq.bmp.set(i, bm); kick();
     }, () => seq.pending.delete(i));
   }
+  let lastDir = 1;
   function ensureBitmaps() {
-    const c = Math.round(seq.disp); const dir = seq.target >= seq.disp ? 1 : -1;
-    for (let k = 0; k <= BMP_AHEAD && seq.pending.size < DEC_PAR; k++) {
-      for (const i of k <= BMP_BACK ? [c + dir * k, c - dir * k] : [c + dir * k]) {
-        if (seq.pending.size >= DEC_PAR) break;
-        if (i >= 1 && i <= SEQ.n && seq.blobs[i] && !seq.bmp.has(i) && !seq.pending.has(i)) decode(i);
-      }
+    // распаковываем по направлению движения, с запасом до цели прокрутки: сначала через кадр, затем пропуски
+    const gap = seq.target - seq.disp; const dir = Math.abs(gap) > 0.05 ? Math.sign(gap) : lastDir; lastDir = dir;
+    const c = Math.round(seq.disp); const reach = Math.min(64, 22 + Math.ceil(Math.abs(gap)));
+    const list = [c];
+    for (let k = 2; k <= reach; k += 2) list.push(c + dir * k);
+    for (let k = 1; k <= reach; k += 2) list.push(c + dir * k);
+    for (let k = 1; k <= 8; k++) list.push(c - dir * k);
+    for (const i of list) {
+      if (seq.pending.size >= DEC_PAR) break;
+      if (i >= 1 && i <= SEQ.n && seq.blobs[i] && !seq.bmp.has(i) && !seq.pending.has(i)) decode(i);
     }
     if (seq.bmp.size > BMP_MAX) {
-      const far = [...seq.bmp.keys()].sort((x, y) => Math.abs(y - c) - Math.abs(x - c));
+      const score = (i) => { const d = (i - c) * dir; return d >= 0 ? d * 0.5 : -d * 2; };
+      const far = [...seq.bmp.keys()].sort((x, y) => score(y) - score(x));
       while (seq.bmp.size > BMP_MAX && far.length) { const i = far.shift(); const bm = seq.bmp.get(i); bm.close && bm.close(); seq.bmp.delete(i); }
     }
   }
@@ -171,18 +177,23 @@
   const SEQ_MODE = (/[?&]seqmode=(\w+)/.exec(location.search) || [])[1] || 'single'; // замер 21.11 на GPU: single ровнее, чем layers
   let single = { key: '', ctx: null };
   function drawSeqSingle() {
-    const wf = clamp(seq.disp, 1, SEQ.n); const i0 = Math.floor(wf), i1 = Math.min(SEQ.n, i0 + 1);
-    let a = Math.round((wf - i0) * 16) / 16, f0 = i0; let b1 = null;
-    if (!seq.bmp.has(i0)) { f0 = nearestBmp(i0); a = 0; }
-    if (!f0) return;
-    const b0 = seq.bmp.get(f0);
-    if (f0 === i0 && a > 0) { b1 = seq.bmp.get(i1) || null; if (!b1) a = 0; }
-    const key = f0 + ':' + (b1 ? i1 : 0) + ':' + a; if (key === single.key && seq.shown) return;
-    const cv = D.cv; const W = b0.width, H = b0.height;
+    // смешиваем ближайшие готовые кадры по обе стороны: даже если промежуточный ещё не распакован, движение не прыгает
+    const wf = clamp(seq.disp, 1, SEQ.n); const fl = Math.floor(wf), ce = Math.ceil(wf);
+    let lo = -1, hi = -1;
+    for (let k = 0; k <= 8 && (lo < 0 || hi < 0); k++) {
+      if (lo < 0 && seq.bmp.has(fl - k)) lo = fl - k;
+      if (hi < 0 && seq.bmp.has(ce + k)) hi = ce + k;
+    }
+    let a = 0;
+    if (lo < 0 && hi < 0) { lo = nearestBmp(Math.round(wf)); if (!lo) return; hi = lo; }
+    else if (lo < 0) lo = hi; else if (hi < 0) hi = lo;
+    if (hi !== lo) a = Math.round(((wf - lo) / (hi - lo)) * 16) / 16;
+    const key = lo + ':' + hi + ':' + a; if (key === single.key && seq.shown) return;
+    const b0 = seq.bmp.get(lo); const cv = D.cv; const W = b0.width, H = b0.height;
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; single.ctx = null; }
     const ctx = single.ctx || (single.ctx = cv.getContext('2d', { alpha: false }));
     ctx.globalAlpha = 1; ctx.drawImage(b0, 0, 0, W, H);
-    if (b1) { ctx.globalAlpha = a; ctx.drawImage(b1, 0, 0, W, H); ctx.globalAlpha = 1; }
+    if (a > 0 && hi !== lo) { ctx.globalAlpha = a; ctx.drawImage(seq.bmp.get(hi), 0, 0, W, H); ctx.globalAlpha = 1; }
     single.key = key; seq.shown = 'x';
     if (!cv.classList.contains('is-ready')) cv.classList.add('is-ready');
   }
