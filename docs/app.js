@@ -168,7 +168,7 @@
     const ctx = L.ctx || (L.ctx = cv.getContext('2d', { alpha: false }));
     ctx.drawImage(bm, 0, 0, W, H); L.f = f;
   }
-  const SEQ_MODE = (/[?&]seqmode=(\w+)/.exec(location.search) || [])[1] || 'layers';
+  const SEQ_MODE = (/[?&]seqmode=(\w+)/.exec(location.search) || [])[1] || 'single'; // замер 21.11 на GPU: single ровнее, чем layers
   let single = { key: '', ctx: null };
   function drawSeqSingle() {
     const wf = clamp(seq.disp, 1, SEQ.n); const i0 = Math.floor(wf), i1 = Math.min(SEQ.n, i0 + 1);
