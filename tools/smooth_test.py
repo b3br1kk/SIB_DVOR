@@ -23,6 +23,14 @@ try:
   # frame blending inside day: wheel through day section and check canvas changes
   top=pg.evaluate("document.querySelector('.day').offsetTop"); pg.evaluate(f"scrollTo(0,{top+1000})"); pg.wait_for_timeout(500)
   out['clock']=pg.inner_text('.day__clock')
+  # плавность пролёта: колесо по сцене, шаг кадра между отрисовками
+  pg.evaluate(f"scrollTo(0,{top})"); pg.wait_for_timeout(400)
+  pg.evaluate("window.__fs=[];(function f(){const t=document.querySelector('.day__clock').innerText;__fs.push(scrollY);if(__fs.length<120)requestAnimationFrame(f)})()")
+  for _ in range(6): pg.mouse.wheel(0,250); pg.wait_for_timeout(60)
+  pg.wait_for_timeout(1800)
+  ys=pg.evaluate('__fs'); st=[ys[i+1]-ys[i] for i in range(len(ys)-1)]
+  dh=pg.evaluate("document.querySelector('.day').offsetHeight-innerHeight")
+  out['day_px_per_frame']=round(dh/440,1); out['max_scroll_step_px']=max(st)
   out['errs']=errs; b.close()
 finally: srv.terminate()
 print(json.dumps(out,ensure_ascii=False))

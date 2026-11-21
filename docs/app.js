@@ -98,8 +98,8 @@
     arc: $('.sun__arc'), dot: $('.sun__dot'),
   };
   const CH = [{ t: 9 * 60 + 40 }, { t: 13 * 60 }, { t: 18 * 60 + 30 }, { t: 21 * 60 + 30 }];
-  /* Пролёт: 230 кадров из Blender. Удержание главы — неподвижная точка с лёгким дрейфом, затем перелёт. */
-  const SEQ = { n: 230, hold: [[1, 20], [70, 90], [140, 160], [210, 230]], fly: [[20, 70], [90, 140], [160, 210]], HOLD: 0.42 };
+  /* Пролёт: 440 кадров из Blender (перелёт — 120 кадров). Удержание главы — неподвижная точка с лёгким дрейфом, затем перелёт. */
+  const SEQ = { n: 440, hold: [[1, 20], [140, 160], [280, 300], [420, 440]], fly: [[20, 140], [160, 280], [300, 420]], HOLD: 0.36 };
   const seq = { set: '', frames: [], loaded: 0, want: 1, shown: '', ctx: null };
   function seqSet() { return innerHeight > innerWidth * 1.1 ? 'm' : 'd'; }
   function seqInit() {
@@ -107,11 +107,11 @@
     const set = seqSet(); if (set === seq.set) return;
     seq.set = set; seq.frames = new Array(SEQ.n + 2); seq.loaded = 0; seq.shown = '';
     const order = []; const seen = new Set(); const add = (i) => { if (i >= 1 && i <= SEQ.n && !seen.has(i)) { seen.add(i); order.push(i); } };
-    [1, 20, 70, 90, 140, 160, 210, 230].forEach(add);
-    for (const st of [16, 8, 4, 2, 1]) for (let i = 1; i <= SEQ.n; i += st) add(i);
+    [1, 20, 140, 160, 280, 300, 420, 440].forEach(add);
+    for (const st of [32, 16, 8, 4, 2, 1]) for (let i = 1; i <= SEQ.n; i += st) add(i);
     let k = 0, active = 0; const gen = set;
     const next = () => {
-      while (active < 6 && k < order.length) {
+      while (active < 8 && k < order.length) {
         const i = order[k++]; active++;
         const im = new Image(); im.decoding = 'async';
         im.onload = () => {
@@ -120,7 +120,7 @@
           im.decode ? im.decode().then(done, done) : done();
         };
         im.onerror = () => { active--; next(); };
-        im.src = `assets/seq/${set}/${String(i).padStart(4, '0')}.webp`;
+        im.src = `assets/seq2/${set}/${String(i).padStart(4, '0')}.webp`;
       }
     };
     next();
