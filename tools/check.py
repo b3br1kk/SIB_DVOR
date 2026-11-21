@@ -1,6 +1,6 @@
 import sys, json, asyncio, subprocess, time, os
 from playwright.sync_api import sync_playwright
-ROOT='/home/claude/site/docs'; QA='/home/claude/site/qa'
+ROOT='/home/claude/sib_dvor/docs'; QA='/home/claude/sib_dvor/qa'
 srv=subprocess.Popen(['python3','-m','http.server','8765','-d',ROOT],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); time.sleep(1)
 res={}
 try:
@@ -20,7 +20,7 @@ try:
       # day chapters
       top=pg.evaluate("document.querySelector('.day').getBoundingClientRect().top+scrollY")
       dh=pg.evaluate("document.querySelector('.day').offsetHeight")
-      for i,f in enumerate((0.08,0.33,0.58,0.83,0.95)):
+      for i,f in enumerate((0.05,0.17,0.33,0.45,0.58,0.71,0.83)):
         pg.evaluate(f'window.scrollTo(0,{top+(dh-vh)*f})'); pg.wait_for_timeout(500)
         pg.screenshot(path=f'{QA}/{name}_1{i}_day.jpg',quality=70,type='jpeg')
       for sec in ('#karta','#den','#otzyvy','.faq','#kontakty'):

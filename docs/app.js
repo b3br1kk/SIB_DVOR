@@ -93,51 +93,81 @@
 
   /* ——— СУТКИ ДВОРА ——— */
   const D = day && {
-    stage: $('.day__stage'), frame: $('.day__frame'), imgs: $$('.day__img'), cv: $('.day__hl'),
+    stage: $('.day__stage'), cv: $('.day__seq'), poster: $('.day__poster'), load: $('.day__load'),
     steps: $$('.step'), dots: $$('.day__dots i'), hh: $('.day__hh'), mm: $('.day__mm'),
     arc: $('.sun__arc'), dot: $('.sun__dot'),
   };
-  const CH = [
-    { t: 9 * 60 + 40, g: 'ski', f: [0.32, 0.72], fm: [0.25, 0.63], z: 1.15 },
-    { t: 13 * 60, g: 'ethno', f: [0.81, 0.79], fm: [0.81, 0.77], z: 1.55 },
-    { t: 18 * 60 + 30, g: 'banya', f: [0.33, 0.27], fm: [0.31, 0.27], z: 1.22 },
-    { t: 21 * 60 + 30, g: 'cafe', f: [0.46, 0.58], fm: [0.46, 0.56], z: 1.28 },
-  ];
+  const CH = [{ t: 9 * 60 + 40 }, { t: 13 * 60 }, { t: 18 * 60 + 30 }, { t: 21 * 60 + 30 }];
+  /* Пролёт: 230 кадров из Blender. Удержание главы — неподвижная точка с лёгким дрейфом, затем перелёт. */
+  const SEQ = { n: 230, hold: [[1, 20], [70, 90], [140, 160], [210, 230]], fly: [[20, 70], [90, 140], [160, 210]], HOLD: 0.42 };
+  const seq = { set: '', frames: [], loaded: 0, want: 1, shown: 0, ctx: null };
+  function seqSet() { return innerHeight > innerWidth * 1.1 ? 'm' : 'd'; }
+  function seqInit() {
+    if (!D) return;
+    const set = seqSet(); if (set === seq.set) return;
+    seq.set = set; seq.frames = new Array(SEQ.n + 1); seq.loaded = 0; seq.shown = 0;
+    const order = []; const seen = new Set(); const add = (i) => { if (i >= 1 && i <= SEQ.n && !seen.has(i)) { seen.add(i); order.push(i); } };
+    [1, 20, 70, 90, 140, 160, 210, 230].forEach(add);
+    for (const st of [16, 8, 4, 2, 1]) for (let i = 1; i <= SEQ.n; i += st) add(i);
+    let k = 0, active = 0; const gen = set;
+    const next = () => {
+      while (active < 6 && k < order.length) {
+        const i = order[k++]; active++;
+        const im = new Image(); im.decoding = 'async';
+        im.onload = () => {
+          active--; if (gen !== seq.set) return;
+          const done = () => { seq.frames[i] = im; seq.loaded++; if (D.load) { D.load.firstElementChild.style.width = (100 * seq.loaded / SEQ.n).toFixed(1) + '%'; if (seq.loaded >= SEQ.n) D.load.classList.add('is-done'); } drawSeq(); next(); };
+          im.decode ? im.decode().then(done, done) : done();
+        };
+        im.onerror = () => { active--; next(); };
+        im.src = `assets/seq/${set}/${String(i).padStart(4, '0')}.webp`;
+      }
+    };
+    next();
+  }
+  function drawSeq() {
+    if (!D || !seq.frames.length) return;
+    const want = seq.want; let f = 0;
+    for (let d = 0; d <= SEQ.n; d++) {
+      if (seq.frames[want - d]) { f = want - d; break; }
+      if (seq.frames[want + d]) { f = want + d; break; }
+    }
+    if (!f || (f === seq.shown && D.cv.width)) return;
+    const cv = D.cv; const r = D.stage.getBoundingClientRect(); const dpr = Math.min(devicePixelRatio || 1, 1.5);
+    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; seq.ctx = null; }
+    const ctx = seq.ctx || (seq.ctx = cv.getContext('2d', { alpha: false }));
+    const im = seq.frames[f]; const s = Math.max(w / im.naturalWidth, h / im.naturalHeight);
+    const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
+    const ox = seq.set === 'd' ? 0.6 : 0.5; // на широком экране сдвиг кадра вправо, к объекту
+    ctx.drawImage(im, (w - dw) * ox, (h - dh) / 2, dw, dh);
+    seq.shown = f;
+    if (!cv.classList.contains('is-ready')) { cv.classList.add('is-ready'); }
+  }
   let lastActive = -1, dayP = -1;
   function renderDay(p) {
     if (!D) return;
     const n = CH.length; const pp = clamp(p, 0, 0.9999) * n; const c = Math.floor(pp); const u = pp - c;
-    const s = c < n - 1 ? sstep(0.68, 1, u) : 0;
-    D.imgs.forEach((im, i) => { im.style.opacity = i <= c ? 1 : i === c + 1 ? s : 0; });
-    const active = c < n - 1 && u > 0.84 ? c + 1 : c;
+    const H = SEQ.HOLD; const fu = c < n - 1 ? clamp((u - H) / (1 - H), 0, 1) : 0;
+    // кадр пролёта
+    let f;
+    if (c === n - 1) f = lerp(SEQ.hold[c][0], SEQ.hold[c][1], u);
+    else if (u < H) f = lerp(SEQ.hold[c][0], SEQ.hold[c][1], u / H);
+    else f = lerp(SEQ.fly[c][0], SEQ.fly[c][1], fu);
+    seq.want = Math.round(f); drawSeq();
+    const active = c < n - 1 && fu > 0.8 ? c + 1 : c;
     if (active !== lastActive) {
       lastActive = active; day.dataset.t = active;
       D.steps.forEach((el, i) => el.classList.toggle('is-on', i === active));
       D.dots.forEach((el, i) => el.classList.toggle('is-on', i <= active));
     }
-    // часы
+    // часы идут во время перелёта
     const tA = CH[c].t, tB = c < n - 1 ? CH[c + 1].t : 23 * 60 + 10;
-    const mins = Math.round(c < n - 1 ? lerp(tA, tB, sstep(0.55, 1, u)) : lerp(tA, tB, sstep(0.25, 1, u)));
+    const mins = Math.round(c < n - 1 ? lerp(tA, tB, fu) : lerp(tA, tB, sstep(0.2, 1, u)));
     D.hh.textContent = String(Math.floor(mins / 60)).padStart(2, '0');
     D.mm.textContent = String(mins % 60).padStart(2, '0');
-    // солнце/луна по дуге
     const L = D.arc.getTotalLength(); const pt = D.arc.getPointAtLength(L * clamp((mins - 8 * 60) / (15 * 60 + 30), 0, 1));
     D.dot.setAttribute('cx', pt.x); D.dot.setAttribute('cy', pt.y);
-    // камера: фокус на зоне главы
-    const vw = D.stage.clientWidth, vh = D.stage.clientHeight; const W = D.frame.offsetWidth, H = D.frame.offsetHeight;
-    const wide = vw > 900; const fk = wide ? 'f' : 'fm';
-    const fA = CH[c][fk], fB = c < n - 1 ? CH[c + 1][fk] : fA;
-    const fx = lerp(fA[0], fB[0], s), fy = lerp(fA[1], fB[1], s); const zB = c < n - 1 ? CH[c + 1].z : CH[c].z;
-    const z = wide ? lerp(CH[c].z, zB, s) : 1.5;
-    const targetX = wide ? 0.64 * vw : 0.5 * vw, targetY = wide ? 0.48 * vh : 0.27 * vh;
-    const mx = Math.max(0, (W * z - vw) / 2), my = Math.max(0, (H * z - vh) / 2);
-    const tx = clamp(targetX - vw / 2 + (0.5 - fx) * W * z, -mx, mx);
-    const ty = clamp(targetY - vh / 2 + (0.5 - fy) * H * z, -my, my);
-    D.frame.style.transform = `translate(-50%,-50%) translate(${tx.toFixed(1)}px,${ty.toFixed(1)}px) scale(${z})`;
-    // подсветка зоны
-    const aIn = c === 0 ? sstep(0, 0.1, u) : sstep(0.02, 0.16, u);
-    const aCur = c < n - 1 ? aIn * (1 - sstep(0.58, 0.7, u)) : aIn;
-    paint(D.cv, [[CH[c].g, aCur]], c >= 2);
   }
 
   /* ——— прокрутка ——— */
@@ -155,8 +185,10 @@
     });
   }
   addEventListener('scroll', onScroll, { passive: true });
-  addEventListener('resize', () => { dayP = -1; onScroll(); renderMapHL(); }, { passive: true });
-  maskReady.then(() => { dayP = -1; onScroll(); renderMapHL(); });
+  addEventListener('resize', () => { seqInit(); seq.shown = 0; dayP = -1; onScroll(); renderMapHL(); }, { passive: true });
+  maskReady.then(() => { renderMapHL(); });
+  // кадры пролёта грузим после первого экрана
+  if (document.readyState === 'complete') seqInit(); else addEventListener('load', seqInit, { once: true });
   onScroll();
 
   /* ——— КАРТА ——— */

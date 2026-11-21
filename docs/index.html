@@ -12,7 +12,7 @@
 <link rel="preload" href="assets/img/map-morning.webp" as="image" media="(min-width: 900px)">
 <link rel="preload" href="assets/img/map-morning-1400.webp" as="image" media="(max-width: 899px)">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 4 29h24z' fill='%23a6322b'/%3E%3Cpath d='M7 23h18' stroke='%23f4f1ea' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="styles.css?v=2">
+<link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -79,13 +79,9 @@
 <section class="day" id="sutki" aria-label="Сутки двора">
   <div class="day__pin">
     <div class="day__stage">
-      <div class="day__frame" data-frame>
-        <img class="day__img is-on" data-t="0" src="assets/img/map-morning.webp" srcset="assets/img/map-morning-1400.webp 1400w, assets/img/map-morning.webp 2400w" sizes="(max-width: 899px) 300vw, 100vw" width="2400" height="1350" alt="Двор утром: макет участка в холодном свете" loading="lazy">
-        <img class="day__img" data-t="1" src="assets/img/map-day.webp" srcset="assets/img/map-day-1400.webp 1400w, assets/img/map-day.webp 2400w" sizes="(max-width: 899px) 300vw, 100vw" width="2400" height="1350" alt="Двор днём" loading="lazy">
-        <img class="day__img" data-t="2" src="assets/img/map-evening.webp" srcset="assets/img/map-evening-1400.webp 1400w, assets/img/map-evening.webp 2400w" sizes="(max-width: 899px) 300vw, 100vw" width="2400" height="1350" alt="Двор вечером: светятся окна бань" loading="lazy">
-        <img class="day__img" data-t="3" src="assets/img/map-night.webp" srcset="assets/img/map-night-1400.webp 1400w, assets/img/map-night.webp 2400w" sizes="(max-width: 899px) 300vw, 100vw" width="2400" height="1350" alt="Двор ночью: огни кафе и бань" loading="lazy">
-        <canvas class="day__hl" aria-hidden="true"></canvas>
-      </div>
+      <picture><source media="(max-aspect-ratio: 10/11)" srcset="assets/seq/m/0001.webp"><img class="day__poster" src="assets/seq/d/0001.webp" width="1600" height="900" alt="Пролёт над двором: утро у лыжной трассы, день в этнодеревне, вечер у бань, ночь у кафе «Сибирь»" decoding="async"></picture>
+      <canvas class="day__seq" aria-hidden="true"></canvas>
+      <div class="day__load" aria-hidden="true"><i></i></div>
     </div>
 
     <svg class="sun" viewBox="0 0 1000 120" preserveAspectRatio="none" aria-hidden="true">
@@ -97,7 +93,6 @@
       <p class="day__clock" aria-live="off"><span class="day__hh">09</span><span class="day__colon">:</span><span class="day__mm">40</span></p>
       <ol class="day__steps">
         <li class="step is-on" data-step="0">
-          <figure class="step__img"><img src="assets/img/cu-ski-900.webp" srcset="assets/img/cu-ski-900.webp 900w, assets/img/cu-ski.webp 1600w" sizes="(max-width: 899px) 100vw, 430px" width="900" height="506" alt="Лыжная колея ведёт к двору; вдали кафе и бани" decoding="async"></figure>
           <p class="step__tag">Утро</p>
           <h2 class="step__title">После лыжни</h2>
           <p>Городская лыжная база&nbsp;— наши соседи по&nbsp;адресу. Петля трассы рядом с&nbsp;двором: прошли круг&nbsp;— идите греться к&nbsp;нам.</p>
@@ -105,7 +100,6 @@
           <button class="btn btn--line step__add" type="button" data-pick="ski">Утро с&nbsp;лыжней&nbsp;→ в&nbsp;мой день</button>
         </li>
         <li class="step" data-step="1">
-          <figure class="step__img"><img src="assets/img/cu-ethno-900.webp" srcset="assets/img/cu-ethno-900.webp 900w, assets/img/cu-ethno.webp 1600w" sizes="(max-width: 899px) 100vw, 430px" width="900" height="506" alt="Этнодеревня: хантыйский дом, красный и белый чумы, хлебная печь, столы у кострища" decoding="async"></figure>
           <p class="step__tag">День</p>
           <h2 class="step__title">В&nbsp;чуме</h2>
           <p>Этнодеревня&nbsp;— воссозданное стойбище ханты на&nbsp;полутора гектарах: белый чум с&nbsp;орнаментом, «красный» гостевой чум, хантыйский дом, лабаз на&nbsp;сваях и&nbsp;хлебная печь под&nbsp;навесом.</p>
@@ -113,7 +107,6 @@
           <button class="btn btn--line step__add" type="button" data-pick="ethno">Программу&nbsp;→ в&nbsp;мой день</button>
         </li>
         <li class="step" data-step="2">
-          <figure class="step__img"><img src="assets/img/cu-banya-900.webp" srcset="assets/img/cu-banya-900.webp 900w, assets/img/cu-banya.webp 1600w" sizes="(max-width: 899px) 100vw, 430px" width="900" height="506" alt="Бани на дровах за замёрзшим прудом" decoding="async"></figure>
           <p class="step__tag">Вечер</p>
           <h2 class="step__title">В&nbsp;бане</h2>
           <p>Бани на&nbsp;дровах у&nbsp;пруда&nbsp;— разного размера, от&nbsp;двоих до&nbsp;двадцати человек. У&nbsp;каждой своя площадка с&nbsp;мангалом и&nbsp;беседкой.</p>
@@ -121,7 +114,6 @@
           <button class="btn btn--line step__add" type="button" data-pick="banya">Баню&nbsp;→ в&nbsp;мой день</button>
         </li>
         <li class="step" data-step="3">
-          <figure class="step__img"><img src="assets/img/cu-cafe-900.webp" srcset="assets/img/cu-cafe-900.webp 900w, assets/img/cu-cafe.webp 1600w" sizes="(max-width: 899px) 100vw, 430px" width="900" height="506" alt="Кафе «Сибирь» ночью, тёплые окна" decoding="async"></figure>
           <p class="step__tag">Ночь</p>
           <h2 class="step__title">В&nbsp;«Сибири»</h2>
           <p>Кафе на&nbsp;100&nbsp;мест: оленина, заливное, манты. Банкеты, свадьбы и&nbsp;корпоративы&nbsp;— в&nbsp;том же&nbsp;зале.</p>
@@ -315,6 +307,6 @@
 
 <script src="vendor/gsap/gsap.min.js"></script>
 <script src="vendor/gsap/ScrollTrigger.min.js"></script>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
