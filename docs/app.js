@@ -14,7 +14,7 @@
   const NAMES = { 1: 'Кафе «Сибирь»', 2: 'Парковка у кафе', 3: 'Пруд с пирсами', 4: 'Баня на дровах', 5: 'Традиционный чум', 6: '«Красный» гостевой чум', 7: 'Хлебная печь под навесом', 8: 'Лабаз на сваях', 9: 'Хантыйский дом', 10: 'Поляна: столы и очаг', 11: 'Каркас чума', 20: 'Городская лыжная база · соседи', 21: 'Петля лыжной трассы · соседи' };
   const GROUP = { 1: 'cafe', 2: 'cafe', 3: 'banya', 4: 'banya', 5: 'ethno', 6: 'ethno', 7: 'ethno', 8: 'ethno', 9: 'ethno', 10: 'ethno', 11: 'ethno', 20: 'ski', 21: 'ski' };
   const ZONES = {
-    ski: { k: 'Утро · соседи', t: 'Лыжная база и трасса', d: 'Городская лыжная база (СШОР) — муниципальная, не часть «Сибирского двора». Удобно начать день с круга по лыжне и прийти к нам греться.', list: [['Адрес', 'ул. Ленина, 7 к1'], ['Прокат и часы', 'у лыжной базы']], btn: 'Утро с лыжней — в мой день' },
+    ski: { k: 'Утро · соседи', t: 'Лыжная база и трасса', d: 'Городская лыжная база (СШОР) — муниципальная, не часть «Сибирского двора». Записаться на неё через нас нельзя: прокат, часы и запись — у самой базы. Удобно начать день с круга по лыжне и прийти к нам греться.', list: [['Адрес', 'ул. Ленина, 7 к1'], ['Запись и прокат', 'у лыжной базы']], btn: '' },
     ethno: { k: 'День · 12:00–16:00', t: 'Юганская этнодеревня', d: 'Стойбище ханты: белый чум с орнаментом, «красный» гостевой чум, хантыйский дом, лабаз на сваях, хлебная печь, поляна со столами и очагом. Цены программ — с человека.', list: [['Для школьников', '400 ₽'], ['«Знакомство с миром ханты»', '700 ₽'], ['«В гостях у ханты»', '1 300 ₽'], ['«Путешествие в мир ханты»', '1 800 ₽']], btn: 'Программу — в мой день' },
     banya: { k: 'Вечер', t: 'Бани на дровах у пруда', d: 'Бани разного размера в подкове пруда. У каждой своя площадка с мангалом и беседкой.', list: [['Вместимость', '2–20 человек'], ['Стоимость', 'по запросу']], btn: 'Баню — в мой день' },
     cafe: { k: 'День и ночь', t: 'Кафе «Сибирь»', d: 'Зал на 100 мест с национальной кухней: оленина, заливное, манты. Банкеты, свадьбы, корпоративы. Рядом парковка.', list: [['Ланч', '350 ₽'], ['Банкет', 'по запросу']], btn: 'Ужин — в мой день' },
@@ -435,7 +435,7 @@
     if (Z) {
       $('.zone__k', M.zone).textContent = Z.k; $('.zone__t', M.zone).textContent = Z.t; $('.zone__d', M.zone).textContent = Z.d;
       $('.zone__list', M.zone).innerHTML = Z.list.map(([a, b]) => `<li><span>${a}</span><b>${nb(b)}</b></li>`).join('');
-      const btn = $('.zone__add', M.zone); btn.hidden = false; btn.dataset.pick = g; btn.textContent = isPicked(g) ? 'Уже в вашем дне ✓' : Z.btn;
+      const btn = $('.zone__add', M.zone); btn.hidden = !Z.btn; if (!Z.btn) { renderMapHL(); return; } btn.dataset.pick = g; btn.textContent = isPicked(g) ? 'Уже в вашем дне ✓' : Z.btn;
     }
     renderMapHL();
   }
@@ -487,11 +487,10 @@
   function isPicked(g) {
     if (!form) return false;
     const f = form.elements;
-    return g === 'ski' ? f.ski.checked : g === 'banya' ? f.banya.checked : g === 'ethno' ? !!f.prog.value : g === 'cafe' ? !!f.dinner.value : false;
+    return g === 'banya' ? f.banya.checked : g === 'ethno' ? !!f.prog.value : g === 'cafe' ? !!f.dinner.value : false;
   }
   function pick(g) {
     const f = form.elements;
-    if (g === 'ski') f.ski.checked = true;
     if (g === 'banya') f.banya.checked = true;
     if (g === 'ethno' && !f.prog.value) form.querySelector('input[name=prog][value=znak]').checked = true;
     if (g === 'cafe' && !f.dinner.value) form.querySelector('input[name=dinner][value=dinner]').checked = true;
@@ -503,7 +502,6 @@
     $('#guests').textContent = n; $('.num__l').textContent = gWord(n);
     const lines = []; let sum = 0; const ask = [];
     const plan = [];
-    if (f.ski.checked) { lines.push(['Круг по лыжне у соседей', 'у лыжной базы']); plan.push('Утро: круг по лыжне на городской лыжной базе, потом греться к вам.'); }
     const pv = f.prog.value;
     if (pv) {
       const P = PROG[pv];

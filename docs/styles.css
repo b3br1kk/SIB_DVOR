@@ -104,6 +104,7 @@ p{margin:0}
 .step__title{font:400 clamp(30px,2.6vw,38px)/1.08 var(--serif);letter-spacing:-.02em;margin-bottom:12px}
 .step p{font-size:16px;line-height:1.55}
 .step__note{margin-top:10px;font-size:14px!important;opacity:.72}
+.step__aside{margin-top:12px;padding-left:12px;border-left:2px solid var(--red);font-size:14px!important;line-height:1.45}
 .step__q{margin:12px 0 0;padding-left:14px;border-left:2px solid var(--amber);font:italic 400 18px/1.4 var(--serif)}
 .step__q cite{display:block;margin-top:4px;font:500 12.5px/1.3 var(--sans);font-style:normal;opacity:.7}
 .day__dots{display:flex;gap:6px;margin-top:18px}
