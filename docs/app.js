@@ -207,8 +207,7 @@
       output: (frame) => {
         const idx = Math.round(frame.timestamp / 1000); // timestamp = номер кадра × 1000 мкс
         seq.inflight = Math.max(0, seq.inflight - 1);
-        if (gen !== seq.gen || Math.abs(idx + 1 - seq.disp) > CACHE + AHEAD + Math.abs(seq.vel) * 0.2) { frame.close(); kick(); return; }
-        drawDirect(frame, idx);
+        if (gen !== seq.gen || Math.abs(idx + 1 - seq.disp) > CACHE + AHEAD) { frame.close(); kick(); return; }
         createImageBitmap(frame).then((bm) => {
           frame.close();
           if (gen !== seq.gen) { bm.close(); return; }
@@ -219,18 +218,6 @@
       error: () => { seq.decPos = -1; },
     });
     seq.dec.configure(seq.cfg);
-  }
-  // при быстрой прокрутке рисуем кадр сразу из декодера, если он ближе к позиции, чем то, что сейчас на экране
-  let shownIdx = -1;
-  function drawDirect(frame, idx) {
-    const w = clamp(seq.disp, 1, SEQ.n) - 1;
-    if (seq.cache.has(Math.round(w))) return;
-    if (shownIdx >= 0 && Math.abs(idx - w) >= Math.abs(shownIdx - w)) return;
-    const cv = D.cv; const W = frame.displayWidth, H = frame.displayHeight;
-    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; seq.ctx = null; }
-    const ctx = seq.ctx || (seq.ctx = cv.getContext('2d', { alpha: false }));
-    ctx.globalAlpha = 1; ctx.drawImage(frame, 0, 0, W, H); shownIdx = idx; seq.key = 'direct:' + idx;
-    if (!cv.classList.contains('is-ready')) cv.classList.add('is-ready');
   }
   function trimCache() {
     if (seq.cache.size <= CACHE) return;
@@ -261,16 +248,15 @@
       if (need >= 0) break;
     }
     if (need < 0) return;
-    if (seq.inflight >= 10) return;
+    if (seq.inflight >= 6) return;
     // продолжаем подряд, если нужный кадр немного впереди; иначе — с ближайшего ключевого
     if (!(seq.decPos >= 0 && need > seq.decPos && need - seq.decPos <= 40)) {
       const k = keyBefore(need);
       if (!(seq.decPos >= k && seq.decPos < need)) { seq.dec.reset(); seq.dec.configure(seq.cfg); seq.inflight = 0; seq.decPos = k - 1; }
     }
-    // подаём до нужного кадра и с запасом вперёд: чем быстрее листают, тем больше запас
-    const ahead = dir > 0 ? 3 + Math.min(40, Math.ceil(Math.abs(seq.vel) * 0.12)) : 3;
-    const stop = Math.min(S.count - 1, need + ahead);
-    while (seq.decPos < stop && seq.inflight < 14 && avail(seq.decPos + 1)) feed(seq.decPos + 1);
+    // подаём до нужного кадра и на 3 вперёд (декодеру нужен небольшой запас, чтобы отдать кадр)
+    const stop = Math.min(S.count - 1, need + 3);
+    while (seq.decPos < stop && seq.inflight < 8 && avail(seq.decPos + 1)) feed(seq.decPos + 1);
   }
   function seqVideoFallback(url) {
     seq.mode = 'video';
@@ -301,7 +287,7 @@
     const ctx = seq.ctx || (seq.ctx = cv.getContext('2d', { alpha: false }));
     ctx.globalAlpha = 1; ctx.drawImage(b0, 0, 0);
     if (a > 0 && hi !== lo) { ctx.globalAlpha = a; ctx.drawImage(b1, 0, 0); ctx.globalAlpha = 1; }
-    seq.key = key; shownIdx = a >= 0.5 ? hi : lo;
+    seq.key = key;
     if (!cv.classList.contains('is-ready')) cv.classList.add('is-ready');
   }
   function loop(now) {
