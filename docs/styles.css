@@ -74,8 +74,11 @@ p{margin:0}
 .day__pin{position:sticky;top:0;height:100vh;height:100svh;overflow:hidden}
 .day__stage{position:absolute;inset:0;overflow:hidden;background:var(--morning)}
 .day__poster,.day__seq{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:60% 50%}
+@media (max-aspect-ratio:10/11){.day__poster,.day__seq{object-position:50% 50%}}
 .day__seq{opacity:0;transition:opacity .4s}
 .day__seq.is-ready{opacity:1}
+.day__seq--b,.day__seq--b.is-ready{opacity:0;transition:none;will-change:opacity}
+.day__seq{will-change:contents}
 .day__load{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,.12);transition:opacity .6s}
 .day__load i{display:block;height:100%;width:0;background:var(--amber);transition:width .3s}
 .day__load.is-done{opacity:0}

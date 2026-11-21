@@ -93,70 +93,125 @@
 
   /* ——— СУТКИ ДВОРА ——— */
   const D = day && {
-    stage: $('.day__stage'), cv: $('.day__seq'), poster: $('.day__poster'), load: $('.day__load'),
+    stage: $('.day__stage'), cv: $('.day__seq'), cvB: $('.day__seq--b'), poster: $('.day__poster'), load: $('.day__load'),
     steps: $$('.step'), dots: $$('.day__dots i'), hh: $('.day__hh'), mm: $('.day__mm'),
     arc: $('.sun__arc'), dot: $('.sun__dot'),
   };
   const CH = [{ t: 9 * 60 + 40 }, { t: 13 * 60 }, { t: 18 * 60 + 30 }, { t: 21 * 60 + 30 }];
-  /* Пролёт: 440 кадров из Blender (перелёт — 120 кадров). Удержание главы — неподвижная точка с лёгким дрейфом, затем перелёт. */
-  const SEQ = { n: 440, hold: [[1, 20], [140, 160], [280, 300], [420, 440]], fly: [[20, 140], [160, 280], [300, 420]], HOLD: 0.36 };
-  const seq = { set: '', frames: [], loaded: 0, want: 1, shown: '', ctx: null };
+  /* Пролёт: 440 кадров из Blender (компьютер — Full HD 1920×1080, телефон — 720×1280).
+     Кадры скачиваются целиком как сжатые файлы, а распаковываются заранее и только вокруг текущей позиции
+     (ImageBitmap, в фоне): так отрисовка не ждёт декодирования и не рвётся. Рисуем в собственном цикле rAF
+     с лёгким сглаживанием и смешиваем два соседних кадра. */
+  const SEQ = { n: 440, hold: [[1, 20], [140, 160], [280, 300], [420, 440]], fly: [[20, 140], [160, 280], [300, 420]], HOLD: 0.36, dir: { d: 'assets/seq3/d', m: 'assets/seq2/m' } };
+  const seq = { set: '', blobs: [], have: 0, bmp: new Map(), pending: new Set(), target: 1, disp: 1, shown: '', ctx: null, raf: 0, last: 0, gen: 0 };
+  const BMP_AHEAD = 24, BMP_BACK = 10, BMP_MAX = 44, DEC_PAR = 4;
   function seqSet() { return innerHeight > innerWidth * 1.1 ? 'm' : 'd'; }
   function seqInit() {
     if (!D) return;
     const set = seqSet(); if (set === seq.set) return;
-    seq.set = set; seq.frames = new Array(SEQ.n + 2); seq.loaded = 0; seq.shown = '';
+    const gen = ++seq.gen;
+    seq.bmp.forEach((bm) => bm.close && bm.close()); seq.bmp.clear(); seq.pending.clear();
+    seq.set = set; seq.blobs = new Array(SEQ.n + 2); seq.have = 0; seq.shown = '';
     const order = []; const seen = new Set(); const add = (i) => { if (i >= 1 && i <= SEQ.n && !seen.has(i)) { seen.add(i); order.push(i); } };
     [1, 20, 140, 160, 280, 300, 420, 440].forEach(add);
     for (const st of [32, 16, 8, 4, 2, 1]) for (let i = 1; i <= SEQ.n; i += st) add(i);
-    let k = 0, active = 0; const gen = set;
-    const next = () => {
+    let k = 0, active = 0;
+    const pump = () => {
       while (active < 8 && k < order.length) {
         const i = order[k++]; active++;
-        const im = new Image(); im.decoding = 'async';
-        im.onload = () => {
-          active--; if (gen !== seq.set) return;
-          const done = () => { seq.frames[i] = im; seq.loaded++; if (D.load) { D.load.firstElementChild.style.width = (100 * seq.loaded / SEQ.n).toFixed(1) + '%'; if (seq.loaded >= SEQ.n) D.load.classList.add('is-done'); } drawSeq(); next(); };
-          im.decode ? im.decode().then(done, done) : done();
-        };
-        im.onerror = () => { active--; next(); };
-        im.src = `assets/seq2/${set}/${String(i).padStart(4, '0')}.webp`;
+        fetch(`${SEQ.dir[set]}/${String(i).padStart(4, '0')}.webp`).then((r) => (r.ok ? r.blob() : null)).then((bl) => {
+          active--; if (gen !== seq.gen) return;
+          if (bl) {
+            seq.blobs[i] = bl; seq.have++;
+            if (D.load) { D.load.firstElementChild.style.width = (100 * seq.have / SEQ.n).toFixed(1) + '%'; if (seq.have >= SEQ.n) D.load.classList.add('is-done'); }
+          }
+          kick(); pump();
+        }, () => { active--; pump(); });
       }
     };
-    next();
+    pump();
   }
-  function nearestLoaded(i) {
-    for (let d = 0; d <= SEQ.n; d++) {
-      if (seq.frames[i - d]) return i - d;
-      if (seq.frames[i + d]) return i + d;
+  function decode(i) {
+    const gen = seq.gen; seq.pending.add(i);
+    const bl = seq.blobs[i];
+    const p = window.createImageBitmap ? createImageBitmap(bl) : new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(bl); });
+    p.then((bm) => {
+      seq.pending.delete(i);
+      if (gen !== seq.gen) { bm.close && bm.close(); return; }
+      seq.bmp.set(i, bm); kick();
+    }, () => seq.pending.delete(i));
+  }
+  function ensureBitmaps() {
+    const c = Math.round(seq.disp); const dir = seq.target >= seq.disp ? 1 : -1;
+    for (let k = 0; k <= BMP_AHEAD && seq.pending.size < DEC_PAR; k++) {
+      for (const i of k <= BMP_BACK ? [c + dir * k, c - dir * k] : [c + dir * k]) {
+        if (seq.pending.size >= DEC_PAR) break;
+        if (i >= 1 && i <= SEQ.n && seq.blobs[i] && !seq.bmp.has(i) && !seq.pending.has(i)) decode(i);
+      }
     }
+    if (seq.bmp.size > BMP_MAX) {
+      const far = [...seq.bmp.keys()].sort((x, y) => Math.abs(y - c) - Math.abs(x - c));
+      while (seq.bmp.size > BMP_MAX && far.length) { const i = far.shift(); const bm = seq.bmp.get(i); bm.close && bm.close(); seq.bmp.delete(i); }
+    }
+  }
+  function nearestBmp(i) {
+    for (let d = 1; d <= SEQ.n; d++) { if (seq.bmp.has(i - d)) return i - d; if (seq.bmp.has(i + d)) return i + d; }
     return 0;
   }
-  function drawSeq() {
-    if (!D || !seq.frames.length) return;
-    // дробный кадр: смешиваем два соседних, чтобы пролёт шёл без ступенек
-    const wf = clamp(seq.want, 1, SEQ.n); const i0 = Math.floor(wf), i1 = Math.min(SEQ.n, i0 + 1);
-    let a = Math.round((wf - i0) * 24) / 24;
-    let f0 = seq.frames[i0] ? i0 : nearestLoaded(i0), f1 = 0;
+  // Два слоя: нижний — кадр i0, верхний — кадр i0+1 с прозрачностью дробной части.
+  // Холст перерисовывается только при смене его кадра; смешивание — дешёвая прозрачность слоя.
+  const layer = { a: { f: 0, ctx: null }, b: { f: 0, ctx: null }, op: -1 };
+  function paintLayer(cv, L, f) {
+    if (L.f === f) return;
+    const bm = seq.bmp.get(f); const W = bm.width, H = bm.height;
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; L.ctx = null; }
+    const ctx = L.ctx || (L.ctx = cv.getContext('2d', { alpha: false }));
+    ctx.drawImage(bm, 0, 0, W, H); L.f = f;
+  }
+  const SEQ_MODE = (/[?&]seqmode=(\w+)/.exec(location.search) || [])[1] || 'layers';
+  let single = { key: '', ctx: null };
+  function drawSeqSingle() {
+    const wf = clamp(seq.disp, 1, SEQ.n); const i0 = Math.floor(wf), i1 = Math.min(SEQ.n, i0 + 1);
+    let a = Math.round((wf - i0) * 16) / 16, f0 = i0; let b1 = null;
+    if (!seq.bmp.has(i0)) { f0 = nearestBmp(i0); a = 0; }
     if (!f0) return;
-    if (f0 === i0 && a > 0 && seq.frames[i1]) f1 = i1; else a = 0;
-    const key = f0 + ':' + f1 + ':' + a;
-    const cv = D.cv; const r = D.stage.getBoundingClientRect(); const dpr = Math.min(devicePixelRatio || 1, 1.5);
-    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
-    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; seq.ctx = null; seq.shown = ''; }
-    if (key === seq.shown) return;
-    const ctx = seq.ctx || (seq.ctx = cv.getContext('2d', { alpha: false }));
-    const ox = seq.set === 'd' ? 0.6 : 0.5; // на широком экране кадр сдвинут вправо, к объекту
-    const put = (im, alpha) => {
-      const s = Math.max(w / im.naturalWidth, h / im.naturalHeight); const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
-      ctx.globalAlpha = alpha; ctx.drawImage(im, (w - dw) * ox, (h - dh) / 2, dw, dh);
-    };
-    put(seq.frames[f0], 1);
-    if (f1) put(seq.frames[f1], a);
-    ctx.globalAlpha = 1;
-    seq.shown = key;
+    const b0 = seq.bmp.get(f0);
+    if (f0 === i0 && a > 0) { b1 = seq.bmp.get(i1) || null; if (!b1) a = 0; }
+    const key = f0 + ':' + (b1 ? i1 : 0) + ':' + a; if (key === single.key && seq.shown) return;
+    const cv = D.cv; const W = b0.width, H = b0.height;
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; single.ctx = null; }
+    const ctx = single.ctx || (single.ctx = cv.getContext('2d', { alpha: false }));
+    ctx.globalAlpha = 1; ctx.drawImage(b0, 0, 0, W, H);
+    if (b1) { ctx.globalAlpha = a; ctx.drawImage(b1, 0, 0, W, H); ctx.globalAlpha = 1; }
+    single.key = key; seq.shown = 'x';
     if (!cv.classList.contains('is-ready')) cv.classList.add('is-ready');
   }
+  function drawSeq() {
+    if (SEQ_MODE === 'single') return drawSeqSingle();
+    const wf = clamp(seq.disp, 1, SEQ.n); const i0 = Math.floor(wf), i1 = Math.min(SEQ.n, i0 + 1);
+    let a = Math.round((wf - i0) * 32) / 32; let f0 = i0;
+    if (!seq.bmp.has(i0)) { f0 = nearestBmp(i0); a = 0; }
+    if (!f0) return;
+    if (seq.shown === '' ) { layer.a.f = 0; layer.b.f = 0; layer.op = -1; seq.shown = 'x'; }
+    paintLayer(D.cv, layer.a, f0);
+    const useB = f0 === i0 && a > 0 && i1 !== i0 && seq.bmp.has(i1);
+    if (useB) paintLayer(D.cvB, layer.b, i1);
+    const op = useB ? a : 0;
+    if (op !== layer.op) { D.cvB.style.opacity = op; layer.op = op; }
+    if (!D.cv.classList.contains('is-ready')) D.cv.classList.add('is-ready');
+  }
+  function loop(now) {
+    seq.raf = 0;
+    const dt = Math.min(0.05, (now - (seq.last || now)) / 1000 || 1 / 60); seq.last = now;
+    const gap = seq.target - seq.disp;
+    if (Math.abs(gap) > 48) seq.disp = seq.target - Math.sign(gap) * 48; // большой прыжок (клавиши, якорь) — догоняем, не листая всё
+    seq.disp += (seq.target - seq.disp) * (1 - Math.exp(-16 * dt));
+    if (Math.abs(seq.target - seq.disp) < 0.01) seq.disp = seq.target;
+    ensureBitmaps(); drawSeq();
+    if (seq.disp !== seq.target || seq.pending.size) seq.raf = requestAnimationFrame(loop); else seq.last = 0;
+  }
+  function kick() { if (!seq.raf && D) seq.raf = requestAnimationFrame(loop); }
+  window.__sdSeq = { mode: SEQ_MODE, seq };
   let lastActive = -1, dayP = -1;
   function renderDay(p) {
     if (!D) return;
@@ -167,7 +222,7 @@
     if (c === n - 1) f = lerp(SEQ.hold[c][0], SEQ.hold[c][1], u);
     else if (u < H) f = lerp(SEQ.hold[c][0], SEQ.hold[c][1], u / H);
     else f = lerp(SEQ.fly[c][0], SEQ.fly[c][1], fu);
-    seq.want = f; drawSeq();
+    seq.target = f; kick();
     const active = c < n - 1 && fu > 0.8 ? c + 1 : c;
     if (active !== lastActive) {
       lastActive = active; day.dataset.t = active;
@@ -255,7 +310,7 @@
     });
   }
   addEventListener('scroll', onScroll, { passive: true });
-  addEventListener('resize', () => { seqInit(); seq.shown = ''; dayP = -1; onScroll(); renderMapHL(); }, { passive: true });
+  addEventListener('resize', () => { seqInit(); seq.shown = ''; kick(); dayP = -1; onScroll(); renderMapHL(); }, { passive: true });
   maskReady.then(() => { renderMapHL(); });
   // кадры пролёта грузим после первого экрана
   if (document.readyState === 'complete') seqInit(); else addEventListener('load', seqInit, { once: true });
