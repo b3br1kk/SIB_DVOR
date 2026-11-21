@@ -16,6 +16,7 @@
   --ease:cubic-bezier(.22,.7,.18,1);
 }
 *,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%;scroll-padding-top:calc(var(--banner) + 72px)}
 body{margin:0;background:var(--snow);color:var(--ink);font:400 17px/1.55 var(--sans);font-feature-settings:"lnum","pnum";-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 img{display:block;max-width:100%;height:auto}
@@ -173,6 +174,10 @@ p{margin:0}
 .zone__list li{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px dashed rgba(26,33,51,.18)}
 .zone__list b{font-weight:600;white-space:nowrap}
 .zone__add{margin-top:18px;width:100%}
+.zone__next{margin-top:18px;width:100%}
+.zone--neighbor{box-shadow:inset 0 0 0 1.5px rgba(26,33,51,.22);background:var(--snow) repeating-linear-gradient(135deg,rgba(26,33,51,.035) 0 10px,transparent 10px 20px)}
+.zone--neighbor .zone__k{color:var(--ink-2)}
+.only-m{display:none}
 .map__foot{max-width:var(--max);margin:14px auto 0;padding:0 var(--pad);font-size:13px;color:var(--ink-2)}
 
 /* ——— СОБРАТЬ ДЕНЬ ——— */
