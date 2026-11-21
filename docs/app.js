@@ -4,8 +4,6 @@
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const G = window.gsap && window.ScrollTrigger ? window.gsap : null;
-  if (G) G.registerPlugin(window.ScrollTrigger);
   const MAX_URL = 'https://max.ru/u/f9LHodD0cOLaY0QWOI_nVbSbi6RzxVHj2z8PKyE7IdGz8zfiN4PkCBS8Sq8';
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const lerp = (a, b, t) => a + (b - a) * t;
@@ -98,119 +96,197 @@
     arc: $('.sun__arc'), dot: $('.sun__dot'),
   };
   const CH = [{ t: 9 * 60 + 40 }, { t: 13 * 60 }, { t: 18 * 60 + 30 }, { t: 21 * 60 + 30 }];
-  /* Пролёт: 440 кадров из Blender. Два уровня: лёгкий (640×360 / 360×640, ≈5 МБ, грузится первым за пару секунд —
-     пролёт сразу идёт без пропусков) и полный (1920×1080 / 720×1280), который подгружается вокруг текущей позиции
-     и подменяет кадры. Кадры распаковываются заранее в ImageBitmap по направлению движения.
-     Положение в пролёте ведёт критически демпфированная пружина: скорость камеры набирается и гаснет плавно,
-     не пульсирует от щелчков колеса. */
+  /* Пролёт: 1318 кадров Full HD, упакованных в одно видео H.264 (соседние кадры почти одинаковы — видео в разы легче картинок).
+     Файл качается потоком; свой разбор MP4 знает, где лежит каждый кадр, и аппаратный декодер браузера (WebCodecs)
+     распаковывает ровно тот кадр, который нужен прокрутке. Последние ~32 кадра хранятся готовыми — назад листается мгновенно.
+     Положение в пролёте ведёт критически демпфированная пружина. Без WebCodecs — перемотка того же видео в <video>. */
   const SEQ = {
-    n: 440, hold: [[1, 20], [140, 160], [280, 300], [420, 440]], fly: [[20, 140], [160, 280], [300, 420]], HOLD: 0.36,
-    hi: { d: 'assets/seq3/d', m: 'assets/seq2/m' }, lo: { d: 'assets/seq3/l', m: 'assets/seq2/ml' }, size: { d: [1920, 1080], m: [720, 1280] },
+    n: 1318, hold: [[1, 58], [418, 478], [838, 898], [1258, 1318]], fly: [[58, 418], [478, 838], [898, 1258]], HOLD: 0.36,
+    src: { d: 'assets/fly/fly-d.mp4', m: 'assets/fly/fly-m.mp4' },
   };
-  const seq = { set: '', lo: [], hi: [], haveLo: 0, haveHi: 0, bmp: new Map(), pending: new Set(), target: 1, disp: 1, vel: 0, key: '', ctx: null, raf: 0, last: 0, gen: 0, fetching: new Set() };
-  const BMP_MAX = 64, DEC_PAR = 4, NET_PAR = 8;
-  const OMEGA = +((/[?&]omega=([\d.]+)/.exec(location.search) || [])[1] || 5);
+  const OMEGA = +((/[?&]omega=([\d.]+)/.exec(location.search) || [])[1] || 3);
+  const CACHE = 34, AHEAD = 20;
+  const seq = { set: '', gen: 0, mode: '', target: 1, disp: 1, vel: 0, raf: 0, last: 0, key: '', ctx: null,
+    buf: null, got: 0, total: 0, samples: null, sync: null, codec: null, desc: null,
+    dec: null, decPos: -1, inflight: 0, cache: new Map(), video: null, seeking: false };
   function seqSet() { return innerHeight > innerWidth * 1.1 ? 'm' : 'd'; }
-  const pad4 = (i) => String(i).padStart(4, '0');
+
+  /* ——— минимальный разбор MP4 (одна видеодорожка, moov в начале файла) ——— */
+  function mp4Parse(u8, end) {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const type = (o) => String.fromCharCode(u8[o + 4], u8[o + 5], u8[o + 6], u8[o + 7]);
+    const boxes = (from, to, cb) => {
+      for (let o = from; o + 8 <= to;) {
+        let size = dv.getUint32(o); let hdr = 8;
+        if (size === 1) { size = Number(dv.getBigUint64(o + 8)); hdr = 16; } else if (size === 0) size = to - o;
+        if (o + size > to || size < 8) return false;
+        if (cb(type(o), o + hdr, o + size) === true) return true;
+        o += size;
+      }
+      return false;
+    };
+    let moov = null;
+    boxes(0, end, (t, a, b) => { if (t === 'moov') { moov = [a, b]; return true; } });
+    if (!moov) return null;
+    const find = (path, a, b) => { let r = null; boxes(a, b, (t, x, y) => { if (t === path[0]) { r = path.length === 1 ? [x, y] : find(path.slice(1), x, y); return true; } }); return r; };
+    let stbl = null;
+    boxes(moov[0], moov[1], (t, a, b) => {
+      if (t !== 'trak') return;
+      const hd = find(['mdia', 'hdlr'], a, b); if (!hd) return;
+      if (String.fromCharCode(u8[hd[0] + 8], u8[hd[0] + 9], u8[hd[0] + 10], u8[hd[0] + 11]) !== 'vide') return;
+      stbl = find(['mdia', 'minf', 'stbl'], a, b); return true;
+    });
+    if (!stbl) return null;
+    const box = (n) => find([n], stbl[0], stbl[1]);
+    // stsd → avc1 → avcC
+    const stsd = box('stsd'); const ent = stsd[0] + 8; // version/flags + entry_count
+    const sampleEntryEnd = ent + dv.getUint32(ent);
+    let avcC = null; boxes(ent + 8 + 78, sampleEntryEnd, (t, a, b) => { if (t === 'avcC') { avcC = u8.slice(a, b); return true; } });
+    const codec = 'avc1.' + [avcC[1], avcC[2], avcC[3]].map((x) => x.toString(16).padStart(2, '0')).join('');
+    const stsz = box('stsz'); const fixed = dv.getUint32(stsz[0] + 4), cnt = dv.getUint32(stsz[0] + 8);
+    const sizes = new Uint32Array(cnt); for (let i = 0; i < cnt; i++) sizes[i] = fixed || dv.getUint32(stsz[0] + 12 + i * 4);
+    let offs = []; const stco = box('stco'), co64 = box('co64');
+    if (stco) { const n = dv.getUint32(stco[0] + 4); for (let i = 0; i < n; i++) offs.push(dv.getUint32(stco[0] + 8 + i * 4)); }
+    else { const n = dv.getUint32(co64[0] + 4); for (let i = 0; i < n; i++) offs.push(Number(dv.getBigUint64(co64[0] + 8 + i * 8))); }
+    const stsc = box('stsc'); const sn = dv.getUint32(stsc[0] + 4); const runs = [];
+    for (let i = 0; i < sn; i++) runs.push([dv.getUint32(stsc[0] + 8 + i * 12), dv.getUint32(stsc[0] + 12 + i * 12)]);
+    const sampleOff = new Float64Array(cnt); let si = 0;
+    for (let c = 0; c < offs.length; c++) {
+      let per = runs[0][1]; for (const [first, spc] of runs) if (c + 1 >= first) per = spc;
+      let o = offs[c]; for (let k = 0; k < per && si < cnt; k++) { sampleOff[si] = o; o += sizes[si]; si++; }
+    }
+    const stss = box('stss'); let sync;
+    if (stss) { const n = dv.getUint32(stss[0] + 4); sync = new Uint32Array(n); for (let i = 0; i < n; i++) sync[i] = dv.getUint32(stss[0] + 8 + i * 4) - 1; }
+    else { sync = new Uint32Array(cnt); for (let i = 0; i < cnt; i++) sync[i] = i; }
+    // avcC уже без заголовка бокса — это и есть description для VideoDecoder
+    return { codec, desc: avcC, sizes, offs: sampleOff, sync, syncSet: new Set(sync), count: cnt };
+  }
+
   function seqInit() {
     if (!D) return;
     const set = seqSet(); if (set === seq.set) return;
-    const gen = ++seq.gen;
-    seq.bmp.forEach((e) => e.bm.close && e.bm.close()); seq.bmp.clear(); seq.pending.clear(); seq.fetching.clear();
-    seq.set = set; seq.lo = new Array(SEQ.n + 2); seq.hi = new Array(SEQ.n + 2); seq.haveLo = 0; seq.haveHi = 0; seq.key = '';
-    const [W, H] = SEQ.size[set]; D.cv.width = W; D.cv.height = H; seq.ctx = null;
-    // очередь лёгкого уровня: ключевые кадры, затем шагами
-    const loOrder = []; const seen = new Set(); const add = (i) => { if (i >= 1 && i <= SEQ.n && !seen.has(i)) { seen.add(i); loOrder.push(i); } };
-    [1, 20, 140, 160, 280, 300, 420, 440].forEach(add);
-    for (const st of [16, 8, 4, 2, 1]) for (let i = 1; i <= SEQ.n; i += st) add(i);
-    let k = 0, active = 0;
-    const nextHi = () => {
-      // ближайший к текущей позиции полный кадр, сначала по направлению движения
-      const c = Math.round(seq.disp), dir = lastDir;
-      for (let d = 0; d <= SEQ.n; d++) {
-        for (const i of [c + dir * d, c - dir * d]) if (i >= 1 && i <= SEQ.n && !seq.hi[i] && !seq.fetching.has('h' + i)) return i;
-      }
-      return 0;
-    };
-    const pump = () => {
-      while (active < NET_PAR) {
-        let tier, i;
-        // лёгкий уровень первым; полный — когда лёгкий почти готов (или 2 потока сразу)
-        if (k < loOrder.length) { tier = 'l'; i = loOrder[k++]; } // сначала весь лёгкий уровень
-        else { i = nextHi(); tier = 'h'; if (!i) { if (k < loOrder.length) { tier = 'l'; i = loOrder[k++]; } else break; } }
-        active++; seq.fetching.add(tier + i);
-        const url = `${(tier === 'l' ? SEQ.lo : SEQ.hi)[set]}/${pad4(i)}.webp`;
-        fetch(url).then((r) => (r.ok ? r.blob() : null)).then((bl) => {
-          active--; seq.fetching.delete(tier + i); if (gen !== seq.gen) return;
-          if (bl) {
-            if (tier === 'l') { seq.lo[i] = bl; seq.haveLo++; } else { seq.hi[i] = bl; seq.haveHi++; }
-            if (D.load) {
-              D.load.firstElementChild.style.width = (100 * (seq.haveLo + seq.haveHi) / (2 * SEQ.n)).toFixed(1) + '%';
-              if (seq.haveHi >= SEQ.n) D.load.classList.add('is-done');
-            }
+    const gen = ++seq.gen; seq.set = set; seq.key = '';
+    seq.cache.forEach((bm) => bm.close && bm.close()); seq.cache.clear();
+    if (seq.dec) { try { seq.dec.close(); } catch (e) {} seq.dec = null; }
+    if (seq.video) { seq.video.remove(); seq.video = null; }
+    seq.buf = null; seq.got = 0; seq.samples = null; seq.decPos = -1; seq.inflight = 0;
+    const url = SEQ.src[set];
+    if (!('VideoDecoder' in window) || !window.ReadableStream) return seqVideoFallback(url);
+    fetch(url).then(async (res) => {
+      if (!res.ok || !res.body) throw new Error('fetch');
+      const total = +res.headers.get('Content-Length') || 0;
+      let buf = new Uint8Array(total || 8 << 20), got = 0;
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read(); if (done) break; if (gen !== seq.gen) return;
+        if (got + value.length > buf.length) { const nb = new Uint8Array(Math.max(buf.length * 2, got + value.length)); nb.set(buf.subarray(0, got)); buf = nb; }
+        buf.set(value, got); got += value.length; seq.buf = buf; seq.got = got; seq.total = total || got;
+        if (!seq.samples) {
+          const info = mp4Parse(buf, got);
+          if (info) {
+            const cfg = { codec: info.codec, description: info.desc, hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true };
+            let ok = false; try { ok = (await VideoDecoder.isConfigSupported(cfg)).supported; } catch (e) { ok = false; }
+            if (gen !== seq.gen) return;
+            if (!ok) { cfg.hardwareAcceleration = 'no-preference'; try { ok = (await VideoDecoder.isConfigSupported(cfg)).supported; } catch (e) {} }
+            if (!ok) { reader.cancel(); return seqVideoFallback(url); }
+            seq.samples = info; seq.cfg = cfg; seq.mode = 'codecs'; newDecoder();
           }
-          kick(); pump();
-        }, () => { active--; seq.fetching.delete(tier + i); pump(); });
+        }
+        if (D.load) D.load.firstElementChild.style.width = (100 * got / (seq.total || got)).toFixed(1) + '%';
+        kick();
       }
-    };
-    pump();
+      if (D.load) D.load.classList.add('is-done');
+      kick();
+    }).catch(() => { if (gen === seq.gen) seqVideoFallback(url); });
   }
-  function decode(i, tier) {
-    const gen = seq.gen; seq.pending.add(i);
-    const bl = tier === 'h' ? seq.hi[i] : seq.lo[i];
-    const p = window.createImageBitmap ? createImageBitmap(bl) : new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(bl); });
-    p.then((bm) => {
-      seq.pending.delete(i);
-      if (gen !== seq.gen) { bm.close && bm.close(); return; }
-      const old = seq.bmp.get(i); if (old && old.hi && tier !== 'h') { bm.close && bm.close(); return; }
-      if (old && old.bm.close) old.bm.close();
-      seq.bmp.set(i, { bm, hi: tier === 'h' }); seq.key = ''; kick();
-    }, () => seq.pending.delete(i));
+  function newDecoder() {
+    const gen = seq.gen;
+    if (seq.dec) { try { seq.dec.close(); } catch (e) {} }
+    seq.inflight = 0; seq.decPos = -1;
+    seq.dec = new VideoDecoder({
+      output: (frame) => {
+        const idx = Math.round(frame.timestamp / 1000); // timestamp = номер кадра × 1000 мкс
+        seq.inflight = Math.max(0, seq.inflight - 1);
+        if (gen !== seq.gen || Math.abs(idx + 1 - seq.disp) > CACHE + AHEAD) { frame.close(); kick(); return; }
+        createImageBitmap(frame).then((bm) => {
+          frame.close();
+          if (gen !== seq.gen) { bm.close(); return; }
+          const old = seq.cache.get(idx); if (old) old.close();
+          seq.cache.set(idx, bm); trimCache(); seq.key = ''; kick();
+        }, () => frame.close());
+      },
+      error: () => { seq.decPos = -1; },
+    });
+    seq.dec.configure(seq.cfg);
   }
+  function trimCache() {
+    if (seq.cache.size <= CACHE) return;
+    const c = seq.disp - 1;
+    const far = [...seq.cache.keys()].sort((x, y) => Math.abs(y - c) - Math.abs(x - c));
+    while (seq.cache.size > CACHE && far.length) { const i = far.shift(); seq.cache.get(i).close(); seq.cache.delete(i); }
+  }
+  const avail = (i) => seq.samples && i >= 0 && i < seq.samples.count && seq.offEnd(i) <= seq.got;
+  seq.offEnd = (i) => seq.samples.offs[i] + seq.samples.sizes[i];
+  function feed(i) {
+    const S = seq.samples; const o = S.offs[i];
+    const key = S.syncSet.has(i);
+    seq.dec.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: i * 1000, data: seq.buf.subarray(o, o + S.sizes[i]) }));
+    seq.decPos = i; seq.inflight++;
+  }
+  function keyBefore(i) { const sy = seq.samples.sync; let k = 0; for (let j = 0; j < sy.length && sy[j] <= i; j++) k = sy[j]; return k; }
   let lastDir = 1;
-  function ensureBitmaps() {
-    const gap = seq.target - seq.disp; const dir = Math.abs(seq.vel) > 0.2 ? Math.sign(seq.vel) : Math.abs(gap) > 0.05 ? Math.sign(gap) : lastDir; lastDir = dir;
-    const c = Math.round(seq.disp); const reach = Math.min(64, 22 + Math.ceil(Math.abs(gap)) + Math.ceil(Math.abs(seq.vel) * 0.3));
-    const list = [c];
-    for (let k = 2; k <= reach; k += 2) list.push(c + dir * k);
-    for (let k = 1; k <= reach; k += 2) list.push(c + dir * k);
-    for (let k = 1; k <= 8; k++) list.push(c - dir * k);
-    for (const i of list) {
-      if (seq.pending.size >= DEC_PAR) break;
-      if (i < 1 || i > SEQ.n || seq.pending.has(i)) continue;
-      const e = seq.bmp.get(i);
-      if (seq.hi[i] && (!e || !e.hi)) decode(i, 'h');
-      else if (!e && seq.lo[i]) decode(i, 'l');
+  function pumpDecode() {
+    if (seq.mode !== 'codecs' || !seq.dec || seq.dec.state !== 'configured') return;
+    const S = seq.samples; const want = clamp(Math.round(seq.disp) - 1, 0, S.count - 1);
+    const dir = Math.abs(seq.vel) > 0.3 ? Math.sign(seq.vel) : lastDir; lastDir = dir;
+    // какой ближайший нужный кадр ещё не готов
+    let need = -1;
+    for (let k = 0; k <= AHEAD; k++) {
+      for (const i of k ? [want + dir * k, want - dir * Math.min(k, 6)] : [want]) {
+        if (i >= 0 && i < S.count && !seq.cache.has(i) && avail(i)) { need = i; break; }
+      }
+      if (need >= 0) break;
     }
-    if (seq.bmp.size > BMP_MAX) {
-      const score = (i) => { const d = (i - c) * dir; return d >= 0 ? d * 0.5 : -d * 2; };
-      const far = [...seq.bmp.keys()].sort((x, y) => score(y) - score(x));
-      while (seq.bmp.size > BMP_MAX && far.length) { const i = far.shift(); const e = seq.bmp.get(i); e.bm.close && e.bm.close(); seq.bmp.delete(i); }
+    if (need < 0) return;
+    if (seq.inflight >= 6) return;
+    // продолжаем подряд, если нужный кадр немного впереди; иначе — с ближайшего ключевого
+    if (!(seq.decPos >= 0 && need > seq.decPos && need - seq.decPos <= 40)) {
+      const k = keyBefore(need);
+      if (!(seq.decPos >= k && seq.decPos < need)) { seq.dec.reset(); seq.dec.configure(seq.cfg); seq.inflight = 0; seq.decPos = k - 1; }
     }
+    // подаём до нужного кадра и на 3 вперёд (декодеру нужен небольшой запас, чтобы отдать кадр)
+    const stop = Math.min(S.count - 1, need + 3);
+    while (seq.decPos < stop && seq.inflight < 8 && avail(seq.decPos + 1)) feed(seq.decPos + 1);
   }
-  function nearestBmp(i) {
-    for (let d = 1; d <= SEQ.n; d++) { if (seq.bmp.has(i - d)) return i - d; if (seq.bmp.has(i + d)) return i + d; }
-    return 0;
+  function seqVideoFallback(url) {
+    seq.mode = 'video';
+    const v = document.createElement('video'); v.className = 'day__seq day__video is-ready'; v.muted = true; v.playsInline = true; v.preload = 'auto';
+    v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.src = url;
+    v.addEventListener('seeked', () => { seq.seeking = false; kick(); });
+    v.addEventListener('progress', () => { try { const e = v.buffered.length ? v.buffered.end(v.buffered.length - 1) : 0; if (D.load) D.load.firstElementChild.style.width = (100 * e / (v.duration || 1)).toFixed(1) + '%'; } catch (e) {} });
+    D.cv.after(v); D.cv.style.display = 'none'; seq.video = v; kick();
   }
   function drawSeq() {
-    // смешиваем ближайшие готовые кадры по обе стороны дробной позиции
-    const wf = clamp(seq.disp, 1, SEQ.n); const fl = Math.floor(wf), ce = Math.ceil(wf);
-    let lo = -1, hi = -1;
-    for (let k = 0; k <= 8 && (lo < 0 || hi < 0); k++) {
-      if (lo < 0 && seq.bmp.has(fl - k)) lo = fl - k;
-      if (hi < 0 && seq.bmp.has(ce + k)) hi = ce + k;
+    if (seq.mode === 'video') {
+      const v = seq.video; if (!v || seq.seeking || !(v.readyState >= 1)) return;
+      const t = (clamp(seq.disp, 1, SEQ.n) - 1) / 30; if (Math.abs(v.currentTime - t) < 0.5 / 30) return;
+      seq.seeking = true; v.currentTime = t; return;
     }
-    let a = 0;
-    if (lo < 0 && hi < 0) { lo = nearestBmp(Math.round(wf)); if (!lo) return; hi = lo; }
-    else if (lo < 0) lo = hi; else if (hi < 0) hi = lo;
-    if (hi !== lo) a = Math.round(((wf - lo) / (hi - lo)) * 24) / 24;
-    const e0 = seq.bmp.get(lo), e1 = seq.bmp.get(hi);
-    const key = lo + (e0.hi ? 'h' : 'l') + ':' + hi + (e1.hi ? 'h' : 'l') + ':' + a; if (key === seq.key) return;
-    const cv = D.cv; const W = cv.width, H = cv.height;
+    // смешиваем ближайшие готовые кадры по обе стороны дробной позиции
+    const wf = clamp(seq.disp, 1, SEQ.n) - 1; const fl = Math.floor(wf), ce = Math.ceil(wf);
+    let lo = -1, hi = -1;
+    for (let k = 0; k <= 12 && (lo < 0 || hi < 0); k++) {
+      if (lo < 0 && seq.cache.has(fl - k)) lo = fl - k;
+      if (hi < 0 && seq.cache.has(ce + k)) hi = ce + k;
+    }
+    if (lo < 0 && hi < 0) return; if (lo < 0) lo = hi; else if (hi < 0) hi = lo;
+    const a = hi !== lo ? Math.round(((wf - lo) / (hi - lo)) * 24) / 24 : 0;
+    const key = lo + ':' + hi + ':' + a; if (key === seq.key) return;
+    const b0 = seq.cache.get(lo), b1 = seq.cache.get(hi); const cv = D.cv;
+    if (cv.width !== b0.width || cv.height !== b0.height) { cv.width = b0.width; cv.height = b0.height; seq.ctx = null; }
     const ctx = seq.ctx || (seq.ctx = cv.getContext('2d', { alpha: false }));
-    ctx.imageSmoothingQuality = 'high';
-    ctx.globalAlpha = 1; ctx.drawImage(e0.bm, 0, 0, W, H);
-    if (a > 0 && hi !== lo) { ctx.globalAlpha = a; ctx.drawImage(e1.bm, 0, 0, W, H); ctx.globalAlpha = 1; }
+    ctx.globalAlpha = 1; ctx.drawImage(b0, 0, 0);
+    if (a > 0 && hi !== lo) { ctx.globalAlpha = a; ctx.drawImage(b1, 0, 0); ctx.globalAlpha = 1; }
     seq.key = key;
     if (!cv.classList.contains('is-ready')) cv.classList.add('is-ready');
   }
@@ -218,16 +294,16 @@
     seq.raf = 0;
     let dt = (now - (seq.last || now)) / 1000; if (!(dt > 0)) dt = 1 / 60; dt = Math.min(dt, 0.05); seq.last = now;
     const gap = seq.target - seq.disp;
-    if (Math.abs(gap) > 60) { seq.disp = seq.target - Math.sign(gap) * 60; seq.vel = 0; } // прыжок клавишами/якорем
-    // критически демпфированная пружина (полунеявный Эйлер, шаги по 4 мс для устойчивости)
-    for (let t = dt; t > 0; t -= 0.004) {
+    if (Math.abs(gap) > 150) { seq.disp = seq.target - Math.sign(gap) * 150; seq.vel = 0; } // прыжок клавишами/якорем
+    for (let t = dt; t > 0; t -= 0.004) { // критически демпфированная пружина
       const h = Math.min(0.004, t);
       seq.vel += (OMEGA * OMEGA * (seq.target - seq.disp) - 2 * OMEGA * seq.vel) * h;
       seq.disp += seq.vel * h;
     }
     if (Math.abs(seq.target - seq.disp) < 0.005 && Math.abs(seq.vel) < 0.02) { seq.disp = seq.target; seq.vel = 0; }
-    ensureBitmaps(); drawSeq();
-    if (seq.disp !== seq.target || seq.pending.size) seq.raf = requestAnimationFrame(loop); else seq.last = 0;
+    pumpDecode(); drawSeq();
+    const busy = seq.disp !== seq.target || seq.inflight > 0 || (seq.mode === 'codecs' && !seq.cache.has(clamp(Math.round(seq.disp) - 1, 0, SEQ.n - 1)) && seq.got < seq.total);
+    if (busy) seq.raf = requestAnimationFrame(loop); else seq.last = 0;
   }
   function kick() { if (!seq.raf && D) seq.raf = requestAnimationFrame(loop); }
   window.__sdSeq = { seq };
@@ -259,7 +335,7 @@
 
   /* ——— плавная прокрутка (колесо мыши и тачпад; на телефоне — родная инерция) ———
      Как у Lenis: колесо задаёт цель, страница догоняет её с экспоненциальным затуханием.
-     Прокрутка остаётся нативной, поэтому sticky-блоки и ScrollTrigger работают как обычно. */
+     Прокрутка остаётся нативной, поэтому sticky-блоки работают как обычно. */
   const Smooth = (() => {
     const fine = matchMedia('(hover: hover) and (pointer: fine)').matches;
     const api = { on: fine && !RM, to: null };
@@ -384,7 +460,10 @@
     M.seg.forEach((b) => b.addEventListener('click', () => {
       const t = b.dataset.time;
       M.seg.forEach((x) => x.setAttribute('aria-checked', String(x === b)));
-      M.imgs.forEach((im) => im.classList.toggle('is-on', im.dataset.t === t));
+      M.imgs.forEach((im) => {
+        if (im.dataset.t === t && im.dataset.srcset) { im.srcset = im.dataset.srcset; im.src = im.dataset.src; delete im.dataset.srcset; }
+        im.classList.toggle('is-on', im.dataset.t === t);
+      });
       mapT = t; renderMapHL();
     }));
     M.imgs.forEach((im) => im.classList.toggle('is-on', im.dataset.t === '1'));
@@ -504,13 +583,15 @@
     updatePlan();
   }
 
-  /* ——— появление ——— */
-  if (G && !RM) {
-    G.from('.hero__in > *', { y: 26, opacity: 0, duration: 1.1, ease: 'power3.out', stagger: 0.09, delay: 0.15 });
-    G.from('.hero__hint, .hero__time', { opacity: 0, duration: 1, delay: 0.9 });
-    G.utils.toArray('.sec-head, .rq, .rates li, .faq details').forEach((el) => {
-      G.from(el, { y: 24, opacity: 0, duration: 0.9, ease: 'power2.out', scrollTrigger: { trigger: el, start: 'top 88%', once: true } });
-    });
-    G.from('.receipt__paper', { y: 60, opacity: 0, duration: 1, ease: 'power3.out', scrollTrigger: { trigger: '.plan__grid', start: 'top 70%', once: true } });
+  /* ——— появление (без библиотек: IntersectionObserver + CSS-переходы) ——— */
+  if (!RM && 'IntersectionObserver' in window) {
+    const root = document.documentElement; root.classList.add('reveal-on');
+    $$('.hero__in > *').forEach((el, i) => { el.style.setProperty('--d', (0.15 + i * 0.09).toFixed(2) + 's'); });
+    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('hero-in')));
+    const els = $$('.sec-head, .rq, .rates li, .faq details, .receipt__paper');
+    const io = new IntersectionObserver((ents) => {
+      ents.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); } });
+    }, { rootMargin: '0px 0px -12% 0px' });
+    els.forEach((el) => { el.classList.add('rv'); io.observe(el); });
   }
 })();

@@ -12,7 +12,7 @@
 <link rel="preload" href="assets/img/map-morning.webp" as="image" media="(min-width: 900px)">
 <link rel="preload" href="assets/img/map-morning-1400.webp" as="image" media="(max-width: 899px)">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3 4 29h24z' fill='%23a6322b'/%3E%3Cpath d='M7 23h18' stroke='%23f4f1ea' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="styles.css?v=11">
+<link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -79,7 +79,7 @@
 <section class="day" id="sutki" aria-label="Сутки двора">
   <div class="day__pin">
     <div class="day__stage">
-      <picture><source media="(max-aspect-ratio: 10/11)" srcset="assets/seq2/m/0001.webp"><img class="day__poster" src="assets/seq3/d/0001.webp" width="1920" height="1080" alt="Пролёт над двором: утро у лыжной трассы, день в этнодеревне, вечер у бань, ночь у кафе «Сибирь»" decoding="async"></picture>
+      <picture><source media="(max-aspect-ratio: 10/11)" srcset="assets/fly/poster-m.webp"><img class="day__poster" src="assets/fly/poster-d.webp" width="1920" height="1080" alt="Пролёт над двором: утро у лыжной трассы, день в этнодеревне, вечер у бань, ночь у кафе «Сибирь»" decoding="async"></picture>
       <canvas class="day__seq" aria-hidden="true"></canvas>
       <div class="day__load" aria-hidden="true"><i></i></div>
     </div>
@@ -148,10 +148,10 @@
   <div class="map__wrap">
     <div class="map__scroll">
       <div class="map__frame">
-        <img class="map__img is-on" data-t="0" src="assets/img/map-morning-1400.webp" srcset="assets/img/map-morning-1400.webp 1400w, assets/img/map-morning.webp 2400w" sizes="(max-width: 899px) 180vw, 1400px" width="2400" height="1350" alt="" loading="lazy">
+        <img class="map__img is-on" data-t="0" data-src="assets/img/map-morning-1400.webp" data-srcset="assets/img/map-morning-1400.webp 1400w, assets/img/map-morning.webp 2400w" sizes="(max-width: 899px) 180vw, 1400px" width="2400" height="1350" alt="" loading="lazy">
         <img class="map__img" data-t="1" src="assets/img/map-day-1400.webp" srcset="assets/img/map-day-1400.webp 1400w, assets/img/map-day.webp 2400w" sizes="(max-width: 899px) 180vw, 1400px" width="2400" height="1350" alt="Карта двора: кафе с парковкой в центре, бани у пруда на северо-западе, этнодеревня на востоке, лыжная база на юге" loading="lazy">
-        <img class="map__img" data-t="2" src="assets/img/map-evening-1400.webp" srcset="assets/img/map-evening-1400.webp 1400w, assets/img/map-evening.webp 2400w" sizes="(max-width: 899px) 180vw, 1400px" width="2400" height="1350" alt="" loading="lazy">
-        <img class="map__img" data-t="3" src="assets/img/map-night-1400.webp" srcset="assets/img/map-night-1400.webp 1400w, assets/img/map-night.webp 2400w" sizes="(max-width: 899px) 180vw, 1400px" width="2400" height="1350" alt="" loading="lazy">
+        <img class="map__img" data-t="2" data-src="assets/img/map-evening-1400.webp" data-srcset="assets/img/map-evening-1400.webp 1400w, assets/img/map-evening.webp 2400w" sizes="(max-width: 899px) 180vw, 1400px" width="2400" height="1350" alt="" loading="lazy">
+        <img class="map__img" data-t="3" data-src="assets/img/map-night-1400.webp" data-srcset="assets/img/map-night-1400.webp 1400w, assets/img/map-night.webp 2400w" sizes="(max-width: 899px) 180vw, 1400px" width="2400" height="1350" alt="" loading="lazy">
         <canvas class="map__hl" aria-hidden="true"></canvas>
         <div class="map__pins">
           <button class="pin" type="button" data-zone="banya" style="--x:32.3%;--y:27%">Бани у&nbsp;пруда</button>
@@ -305,8 +305,6 @@
   <p class="foot__demo">Демо-концепт, не&nbsp;официальный сайт. Факты, цены и&nbsp;отзывы&nbsp;— из&nbsp;открытых источников (ВКонтакте, sibirskij-dvor.ru, Яндекс Карты, 2ГИС) на&nbsp;20.11.2026. Иллюстрации&nbsp;— 3D-макет, условная схема не&nbsp;в&nbsp;масштабе. Лыжная база&nbsp;— муниципальное учреждение, не&nbsp;часть «Сибирского двора».</p>
 </footer>
 
-<script src="vendor/gsap/gsap.min.js"></script>
-<script src="vendor/gsap/ScrollTrigger.min.js"></script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
